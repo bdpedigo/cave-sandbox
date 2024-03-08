@@ -224,6 +224,7 @@ line_sb, lines_df = spatial_graph_mapper(
     point_columns=["x", "y", "z"],
     resolution=viewer_resolution,
     layer_name="bbox",
+    color="red",
 )
 dfs.append(lines_df)
 sbs.append(line_sb)
@@ -242,45 +243,121 @@ dfs.append(l2_line_df)
 sbs.append(l2_line_sb)
 
 
-l2_id = l2_node_data.index[0]
+def get_chunk_bbox(l2_id, cv, viewer_resolution):
+    chunk_loc = cv.meta.decode_chunk_position(l2_id)
+    offset_vox = np.array(cv.meta.voxel_offset(0))
+    # chunk_loc -= np.array([0, 0, 1])
 
-chunk_loc = cv.meta.decode_chunk_position(l2_id)
-offset_vox = np.array(cv.meta.voxel_offset(0))
+    lb = (
+        offset_vox
+        + np.array(np.atleast_2d(chunk_loc) * cv.meta.graph_chunk_size).squeeze()
+    )
+    ub = np.array((lb + cv.meta.chunk_size(0)).squeeze())
 
-lb = (
-    offset_vox + np.array(np.atleast_2d(chunk_loc) * cv.meta.graph_chunk_size).squeeze()
+    scaling = np.array(cv.mip_resolution(0) / viewer_resolution)
+    lb = lb * scaling
+    ub = ub * scaling
+
+    bbox = np.array([lb, ub], dtype=int)
+
+    l2_position = l2_node_data.loc[l2_id][["x", "y", "z"]].values
+
+    if not (l2_position[0] <= bbox[1, 0] and l2_position[0] >= bbox[0, 0]):
+        print("out of x range")
+    if not (l2_position[1] <= bbox[1, 1] and l2_position[1] >= bbox[0, 1]):
+        print("out of y range")
+    if not (l2_position[2] <= bbox[1, 2] and l2_position[2] >= bbox[0, 2]):
+        print("out of z range")
+
+    return bbox
+
+
+node_dfs = []
+edge_dfs = []
+for l2_id in l2_node_data.index[:]:
+    bbox = get_chunk_bbox(l2_id, cv, viewer_resolution)
+    node_df, edge_df = make_bbox_nodes_edges(bbox)
+
+    line_sb, lines_df = spatial_graph_mapper(
+        node_df,
+        edge_df,
+        point_columns=["x", "y", "z"],
+        resolution=viewer_resolution,
+        layer_name=f"bbox-l2-{l2_id}",
+        color="grey",
+    )
+    dfs.append(lines_df)
+    sbs.append(line_sb)
+
+
+from cloudvolume import Bbox
+
+cv_bbox = Bbox(
+    (bbox_ngl[0] / np.array([2, 2, 1])).astype(int),
+    (bbox_ngl[1] / np.array([2, 2, 1])).astype(int),
 )
-ub = np.array((lb + cv.meta.chunk_size(0)).squeeze())
+files = cv.download_files(cv_bbox)
 
-scaling = np.array(cv.mip_resolution(0) / viewer_resolution)
-lb = lb * scaling
-ub = ub * scaling
-
-bbox = np.array([lb, ub], dtype=int)
-
-l2_position = l2_node_data.loc[l2_id][["x", "y", "z"]].values
-
-if not (l2_position[0] < bbox[1, 0] and l2_position[0] > bbox[0, 0]):
-    print("out of x range")
-if not (l2_position[1] < bbox[1, 1] and l2_position[1] > bbox[0, 1]):
-    print("out of y range")
-if not (l2_position[2] < bbox[1, 2] and l2_position[2] > bbox[0, 2]):
-    print("out of z range")
-
-
-node_df, edge_df = make_bbox_nodes_edges(bbox)
+n_vertices = 8
+node_dfs = []
+edge_dfs = []
+for i, file_name in enumerate(files.keys()):
+    res_key = file_name.split("/")[0]
+    x_key = file_name.split("/")[1].split("_")[0]
+    y_key = file_name.split("/")[1].split("_")[1]
+    z_key = file_name.split("/")[1].split("_")[2]
+    cg_res = np.array(res_key.split("_")).astype(int)
+    x_min, x_max = np.array(x_key.split("-")).astype(int)
+    y_min, y_max = np.array(y_key.split("-")).astype(int)
+    z_min, z_max = np.array(z_key.split("-")).astype(int)
+    bounds = np.array([[x_min, x_max], [y_min, y_max], [z_min, z_max]]).T
+    bounds = bounds * np.array([2, 2, 1])
+    node_df, edge_df = make_bbox_nodes_edges(bounds)
+    node_df.index = node_df.index + n_vertices * i
+    edge_df = edge_df + n_vertices * i
+    node_dfs.append(node_df)
+    edge_dfs.append(edge_df)
+all_node_df = pd.concat(node_dfs)
+all_edge_df = pd.concat(edge_dfs)
 
 line_sb, lines_df = spatial_graph_mapper(
-    node_df,
-    edge_df,
+    all_node_df,
+    all_edge_df,
     point_columns=["x", "y", "z"],
     resolution=viewer_resolution,
-    layer_name="bbox-l2",
+    layer_name="bbox-all-l2",
 )
 dfs.append(lines_df)
 sbs.append(line_sb)
 
-
 return_as = "html"
 sb = statebuilder.ChainedStateBuilder(sbs)
 statebuilder.helpers.package_state(dfs, sb, client=client, return_as=return_as)
+
+# %%
+l2_id = l2_node_data.index[0]
+chunk_loc = cv.meta.decode_chunk_position(l2_id)
+offset_vox = np.array(cv.meta.voxel_offset(0))
+cv.meta.graph_chunk_size
+cv.meta.chunk_size(0)
+cv.mip_resolution(0)
+
+print("chunk_loc", chunk_loc)
+print("offset_vox", offset_vox)
+print("graph_chunk_size", cv.meta.graph_chunk_size)
+print("chunk_size", cv.meta.chunk_size(0))
+print("mip_resolution", cv.mip_resolution(0))
+print("viewer_resolution", viewer_resolution)
+
+# %%
+cv.get_chunk_mappings(l2_id)
+# %%
+cv.get_chunk_layer(l2_id)
+# %%
+
+# %%
+type(files)
+
+# %%
+files.keys()
+# %%
