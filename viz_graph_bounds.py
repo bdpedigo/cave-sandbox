@@ -3,6 +3,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+from nglui import statebuilder
 
 import caveclient as cc
 
@@ -57,7 +58,9 @@ def make_bbox(bbox_halfwidth, point_in_nm):
 bbox_cg = make_bbox(bbox_halfwidth, point_in_nm)
 my_edges = cg.level2_chunk_graph(root_id, bounds=bbox_cg.T)
 my_edges = np.array(my_edges, dtype=np.uint64)
-my_edges = np.unique(np.sort(my_edges, axis=1), axis=0).T
+my_edges = pd.DataFrame(
+    np.unique(np.sort(my_edges, axis=1), axis=0), columns=["source", "target"]
+)
 
 # %%
 # get a subgraph of l1 edges
@@ -83,13 +86,15 @@ true_edges = (
 true_edges = true_edges.query("pre != post").values
 
 # sort and remove duplicates
-true_edges = np.unique(np.sort(true_edges, axis=1), axis=0).T
+true_edges = pd.DataFrame(
+    np.unique(np.sort(true_edges, axis=1), axis=0), columns=["source", "target"]
+)
 
 
 # %%
 # compare
-true_edges_index = pd.MultiIndex.from_arrays(true_edges)
-my_edges_index = pd.MultiIndex.from_arrays(my_edges)
+true_edges_index = pd.MultiIndex.from_arrays(true_edges.values.T)
+my_edges_index = pd.MultiIndex.from_arrays(my_edges.values.T)
 my_edges_index.difference(true_edges_index)
 
 
@@ -204,8 +209,6 @@ def make_bbox_nodes_edges(bbox: np.ndarray):
     return node_df, edge_df
 
 
-from nglui import statebuilder
-
 sbs = []
 dfs = []
 viewer_resolution = client.info.viewer_resolution()
@@ -242,10 +245,10 @@ dfs.append(lines_df)
 sbs.append(line_sb)
 
 
-l2_data = get_node_data_for_edges(my_edges)
+l2_node_data = get_node_data_for_edges(my_edges)
 l2_line_sb, l2_line_df = spatial_graph_mapper(
-    l2_data,
-    my_edges.to_frame(),
+    l2_node_data,
+    my_edges,
     point_columns=["x", "y", "z"],
     layer_name="my_l2_graph",
     resolution=viewer_resolution,
@@ -254,10 +257,10 @@ l2_line_sb, l2_line_df = spatial_graph_mapper(
 dfs.append(l2_line_df)
 sbs.append(l2_line_sb)
 
-l2_data = get_node_data_for_edges(true_edges)
+l2_node_data = get_node_data_for_edges(true_edges)
 l2_line_sb, l2_line_df = spatial_graph_mapper(
-    l2_data,
-    true_edges.to_frame(),
+    l2_node_data,
+    true_edges,
     point_columns=["x", "y", "z"],
     layer_name="cave_l2_graph",
     resolution=viewer_resolution,
@@ -267,26 +270,25 @@ dfs.append(l2_line_df)
 sbs.append(l2_line_sb)
 
 
-l2_id = l2_data.index[0]
+l2_id = l2_node_data.index[0]
 ngl_resolution = np.array([4, 4, 40])
-img_client = ic.ImageryClient(client=client)
-cv = img_client.segmentation_cv
 
+cv = client.info.segmentation_cloudvolume()
 chunk_loc = cv.meta.decode_chunk_position(l2_id)
 offset_vox = np.array(cv.meta.voxel_offset(0))
-scaling = np.array(cv.mip_resolution(0) / ngl_resolution)
 
 lb = (
     offset_vox + np.array(np.atleast_2d(chunk_loc) * cv.meta.graph_chunk_size).squeeze()
 )
 ub = np.array((lb + cv.meta.chunk_size(0)).squeeze())
 
+scaling = np.array(cv.mip_resolution(0) / ngl_resolution)
 lb = lb * scaling
 ub = ub * scaling
 
 bbox = np.array([lb, ub], dtype=int)
 
-l2_position = l2_data.loc[l2_id][["x", "y", "z"]].values
+l2_position = l2_node_data.loc[l2_id][["x", "y", "z"]].values
 
 if not (l2_position[0] < bbox[1, 0] and l2_position[0] > bbox[0, 0]):
     print("out of x range")
@@ -312,163 +314,3 @@ sbs.append(line_sb)
 return_as = "html"
 sb = statebuilder.ChainedStateBuilder(sbs)
 statebuilder.helpers.package_state(dfs, sb, client=client, return_as=return_as)
-
-
-# %%
-import imageryclient as ic
-
-img_client = ic.ImageryClient(client=client)
-
-
-width = 400
-z_slices = 3
-ctr = point_in_cg.copy()
-ctr = ctr * np.array([2, 2, 1])
-ctr = [169000, 166108, 20759]
-bounds_3d = ic.bounds_from_center(ctr, width=width, height=width, depth=z_slices)
-
-image, segs = img_client.image_and_segmentation_cutout(
-    bounds_3d, split_segmentations=True, scale_to_bounds=True
-)
-
-out = ic.composite_overlay(
-    segs,
-    imagery=image,
-    palette="husl",
-    outline=True,
-    merge_outline=False,
-    alpha=0.8,
-    side="in",
-    width=2,
-)
-out[0]
-
-# %%
-bounds = bounds_3d
-bbox_size = None
-bbox = img_client._compute_bounds(bounds, bbox_size)
-mip = img_client._base_segmentation_mip
-resolution = img_client.resolution
-volume_cutout = img_client.segmentation_cv.download(
-    bbox, agglomerate=False, mip=mip, coord_resolution=resolution
-)
-# volume_cutout = np.array(np.squeeze(volume_cutout))
-# volume_cutout
-
-img_client.segmentation_cv.download()
-
-# %%
-client.chunkedgraph
-
-
-# %%
-img_client.segmentation_cv.graph_config
-
-# %%
-fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-
-# make a matplotlib custom colormap which maps each label to a unique color
-# from the above
-
-import seaborn as sns
-from matplotlib.colors import BoundaryNorm, ListedColormap
-
-unique_ids = np.unique(volume_cutout)
-ids_to_inds = dict(zip(unique_ids, range(len(unique_ids))))
-
-# get the unique colors from seaborn
-color_map = sns.color_palette("husl", len(unique_ids))
-
-# create the colormap
-cmap = ListedColormap(color_map)
-
-# create the norm
-norm = BoundaryNorm(np.arange(-0.5, len(color_map), 1), len(color_map))
-
-# remap the volume cutout to the unique colors
-img_slice = np.squeeze(volume_cutout[:, :, 0])
-row_inds, col_inds = np.nonzero(img_slice)
-vals = volume_cutout[row_inds, col_inds].ravel()
-ind_vals = np.array([ids_to_inds[val] for val in vals])
-
-
-img_slice = np.zeros(img_slice.shape)
-img_slice[row_inds, col_inds] = ind_vals
-
-# plot the first slice of the volume
-ax.imshow(img_slice, cmap=cmap, norm=norm)
-
-
-# ax.imshow(volume_cutout[:, :, 0], cmap=color_map)
-
-# %%
-mask = volume_cutout == volume_cutout[100, 100, 0]
-fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-ax.imshow(mask[:, :, 0], cmap="gray")
-
-# %%
-image, segs = img_client.image_and_segmentation_cutout(
-    ctr,
-    split_segmentations=True,
-    bbox_size=(1024, 1024),
-    scale_to_bounds=True,
-    root_ids=[root_id],
-)
-
-ic.composite_overlay(
-    segs,
-    imagery=image,
-    palette="husl",
-    outline=True,
-    merge_outline=False,
-    alpha=0.8,
-    side="in",
-    width=2,
-)
-
-# %%
-import matplotlib.pyplot as plt
-
-arr_image = image.astype(np.uint8)
-
-fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-ax.imshow(arr_image.T, cmap="grey", vmin=0, vmax=255)
-
-
-def forward(x):
-    return x
-
-
-def inverse(x):
-    return x
-
-
-secax = ax.secondary_xaxis("top", functions=(forward, inverse))
-secax.set_xlabel("angle [rad]")
-# secax.scatter(ctr[0], ctr[1], color="red")
-
-# %%
-scv = img_client.segmentation_cv
-dir(scv)
-
-scv.get_chunk_layer(l2_ids[0])
-
-# %%
-out = scv.get_chunk_mappings(l2_ids[0])
-svs = out[l2_ids[0]]
-len(svs)
-
-# %%
-len(client.chunkedgraph.get_children(l2_ids[0]))
-
-# %%
-help(scv.get_leaves)
-
-# %%
-help(get_chunk)
-
-# %%
-
-scv.download(l2_ids[0])
-
-# %%
