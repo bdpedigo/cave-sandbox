@@ -57,7 +57,7 @@ def make_bbox(bbox_halfwidth, point_in_nm):
 bbox_cg = make_bbox(bbox_halfwidth, point_in_nm)
 my_edges = cg.level2_chunk_graph(root_id, bounds=bbox_cg.T)
 my_edges = np.array(my_edges, dtype=np.uint64)
-my_edges = pd.MultiIndex.from_arrays(np.unique(np.sort(my_edges, axis=1), axis=0).T)
+my_edges = np.unique(np.sort(my_edges, axis=1), axis=0).T
 
 # %%
 # get a subgraph of l1 edges
@@ -83,11 +83,14 @@ true_edges = (
 true_edges = true_edges.query("pre != post").values
 
 # sort and remove duplicates
-true_edges = pd.MultiIndex.from_arrays(np.unique(np.sort(true_edges, axis=1), axis=0).T)
+true_edges = np.unique(np.sort(true_edges, axis=1), axis=0).T
 
 
 # %%
-my_edges.difference(true_edges)
+# compare
+true_edges_index = pd.MultiIndex.from_arrays(true_edges)
+my_edges_index = pd.MultiIndex.from_arrays(my_edges)
+my_edges_index.difference(true_edges_index)
 
 
 # %%
