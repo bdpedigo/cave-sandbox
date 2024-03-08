@@ -8,7 +8,13 @@ from nglui import statebuilder
 import caveclient as cc
 
 client = cc.CAVEclient("minnie65_phase3_v1")
-cg = client.chunkedgraph
+# cg = client.chunkedgraph
+cg = cc.chunkedgraph.ChunkedGraphClient(
+    server_address="http://0.0.0.0:5001",
+    auth_client=client.auth,
+    table_name=client.chunkedgraph._table_name,
+    verify=False,
+)
 cv = client.info.segmentation_cloudvolume()
 
 seg_resolution = np.array(cv.mip_resolution(0))
@@ -52,6 +58,12 @@ def make_bbox(bbox_halfwidth, point_in_nm):
 
 
 bbox_cg = make_bbox(bbox_halfwidth, point_in_nm)
+
+# %%
+my_edges = cg.level2_chunk_graph(root_id, bounds=bbox_cg.T)
+my_edges = np.array(my_edges, dtype=np.uint64)
+my_edges = np.unique(np.sort(my_edges, axis=1), axis=0)
+my_edges = pd.DataFrame(my_edges, columns=["source", "target"])
 
 # %%
 # get a subgraph of l1 edges
@@ -147,6 +159,44 @@ def spatial_graph_mapper(
     return line_sb, line_df
 
 
+def chunk_to_nm(xyz_ch, cv):
+    """Map a chunk location to Euclidean space
+
+    Parameters
+    ----------
+    xyz_ch : array-like
+        Nx3 array of chunk indices
+    cv : cloudvolume.CloudVolume
+        CloudVolume object associated with the chunked space
+    voxel_resolution : list, optional
+        Voxel resolution, by default [4, 4, 40]
+
+    Returns
+    -------
+    np.array
+        Nx3 array of spatial points
+    """
+    x_vox = np.atleast_2d(xyz_ch) * cv.mesh.meta.meta.graph_chunk_size
+    return (x_vox + np.array(cv.mesh.meta.meta.voxel_offset(0))) * cv.mip_resolution(0)
+
+
+def chunk_dims(cv):
+    """Gets the size of a chunk in euclidean space
+
+    Parameters
+    ----------
+    cv : cloudvolume.CloudVolume
+        Chunkedgraph-targeted cloudvolume object
+
+    Returns
+    -------
+    np.array
+        3-element box dimensions of a chunk in nanometers.
+    """
+    dims = chunk_to_nm([1, 1, 1], cv) - chunk_to_nm([0, 0, 0], cv)
+    return np.squeeze(dims)
+
+
 def get_node_data_for_edges(edges: pd.DataFrame):
     l2_ids = np.unique(edges.values)
     l2_data = pd.DataFrame(client.l2cache.get_l2data(l2_ids)).T
@@ -155,254 +205,71 @@ def get_node_data_for_edges(edges: pd.DataFrame):
     l2_data["y"] = l2_data["rep_coord_nm"].apply(lambda x: x[1])
     l2_data["z"] = l2_data["rep_coord_nm"].apply(lambda x: x[2])
     l2_data[["x", "y", "z"]] = l2_data[["x", "y", "z"]] / viewer_resolution
+    chunks = [cv.meta.decode_chunk_position(l2id) for l2id in l2_ids]
+    lbs = [chunk_to_nm(ch, cv) / [4, 4, 40] for ch in chunks]
+    ubs = [lb + chunk_dims(cv) / [4, 4, 40] for lb in lbs]
+    l2_data["lb"] = [lb.squeeze() for lb in lbs]
+    l2_data["ub"] = [ub.squeeze() for ub in ubs]
     return l2_data
 
 
-def make_bbox_nodes_edges(bbox: np.ndarray):
-    # make a dataframe of lines for the edges of the bounding box
-    vertices = [
-        [bbox[0, 0], bbox[0, 1], bbox[0, 2]],
-        [bbox[1, 0], bbox[0, 1], bbox[0, 2]],
-        [bbox[0, 0], bbox[1, 1], bbox[0, 2]],
-        [bbox[1, 0], bbox[1, 1], bbox[0, 2]],
-        [bbox[0, 0], bbox[0, 1], bbox[1, 2]],
-        [bbox[1, 0], bbox[0, 1], bbox[1, 2]],
-        [bbox[0, 0], bbox[1, 1], bbox[1, 2]],
-        [bbox[1, 0], bbox[1, 1], bbox[1, 2]],
-    ]
-
-    node_df = pd.DataFrame(
-        vertices, columns=["x", "y", "z"], index=range(len(vertices))
-    )
-
-    box_edges = [
-        [0, 1],
-        [1, 3],
-        [3, 2],
-        [2, 0],
-        [4, 5],
-        [5, 7],
-        [7, 6],
-        [6, 4],
-        [0, 4],
-        [1, 5],
-        [2, 6],
-        [3, 7],
-    ]
-    edge_df = pd.DataFrame(box_edges, columns=["source", "target"])
-    return node_df, edge_df
-
-
-sbs = []
-dfs = []
-viewer_resolution = client.info.viewer_resolution()
-img_layer = statebuilder.ImageLayerConfig(
-    client.info.image_source(),
-)
-seg_layer = statebuilder.SegmentationLayerConfig(
-    client.info.segmentation_source(), alpha_3d=0.3
-)
-seg_layer.add_selection_map(selected_ids_column="root_id")
-
-base_sb = statebuilder.StateBuilder(
-    [img_layer, seg_layer],
-    client=client,
-    resolution=viewer_resolution,
-    view_kws={"position": point_in_cg * np.array([2, 2, 1])},
-)
-base_df = pd.DataFrame({"root_id": [root_id]})
-sbs.append(base_sb)
-dfs.append(base_df)
-
-
-bbox_ngl = bbox_cg * np.array([2, 2, 1])
-node_df, edge_df = make_bbox_nodes_edges(bbox_ngl)
-
-line_sb, lines_df = spatial_graph_mapper(
-    node_df,
-    edge_df,
-    point_columns=["x", "y", "z"],
-    resolution=viewer_resolution,
-    layer_name="bbox",
-    color="red",
-)
-dfs.append(lines_df)
-sbs.append(line_sb)
-
-
-l2_node_data = get_node_data_for_edges(true_edges)
+# %%
+l2_node_data = get_node_data_for_edges(my_edges)
 l2_line_sb, l2_line_df = spatial_graph_mapper(
     l2_node_data,
-    true_edges,
+    my_edges,
     point_columns=["x", "y", "z"],
     layer_name="cave_l2_graph",
     resolution=viewer_resolution,
     color="red",
 )
+
+#%%
+sbs = []
+dfs = []
+img, seg = statebuilder.from_client(client)
+seg.add_selection_map(fixed_ids=l2_node_data.index)
+seg._view_kws["alpha_3d"] = 0.3
+anno = statebuilder.AnnotationLayerConfig(
+    "l2chunks",
+    mapping_rules=statebuilder.BoundingBoxMapper(
+        point_column_a="lb",
+        point_column_b="ub",
+    ),
+    color="white",
+)
+
+sb = statebuilder.StateBuilder([img, seg, anno], client=client)
+sbs.append(sb)
+dfs.append(l2_node_data)
+
+anno = statebuilder.AnnotationLayerConfig(
+    "query_bounds",
+    mapping_rules=statebuilder.BoundingBoxMapper(
+        point_column_a="lb",
+        point_column_b="ub",
+    ),
+    # color='white'
+)
+anno_sb = statebuilder.StateBuilder([anno], client=client, resolution=viewer_resolution)
+query_bbox_df = pd.DataFrame(
+    [
+        {
+            "lb": bbox_cg[0].squeeze() * np.array([2, 2, 1]),
+            "ub": bbox_cg[1].squeeze() * np.array([2, 2, 1]),
+        }
+    ]
+)
+dfs.append(query_bbox_df)
+sbs.append(anno_sb)
+
+
+
 dfs.append(l2_line_df)
 sbs.append(l2_line_sb)
 
-
-def get_chunk_bbox(l2_id, cv, viewer_resolution):
-    # chunk_loc = cv.meta.decode_chunk_position(l2_id)
-    # offset_vox = np.array(cv.meta.voxel_offset(0))
-    # # chunk_loc -= np.array([0, 0, 1])
-
-    # lb = (
-    #     offset_vox
-    #     + np.array(np.atleast_2d(chunk_loc) * cv.meta.graph_chunk_size).squeeze()
-    # )
-    # ub = np.array((lb + cv.meta.chunk_size(0)).squeeze())
-
-    # scaling = np.array(cv.mip_resolution(0) / viewer_resolution)
-    # lb = lb * scaling
-    # ub = ub * scaling
-    chunk_loc = cv.mesh.meta.meta.decode_chunk_position(l2_id)
-    offset_vox = np.array(cv.mesh.meta.meta.voxel_offset(0))
-    scaling = np.array(cv.mip_resolution(0) / viewer_resolution)
-
-    lb = (
-        offset_vox
-        + np.array(np.atleast_2d(chunk_loc) * cv.mesh.meta.chunk_size).squeeze()
-    ) * scaling
-    ub = lb + cv.mesh.meta.chunk_size * scaling
-
-    bbox = np.array([lb, ub], dtype=int)
-
-    l2_position = l2_node_data.loc[l2_id][["x", "y", "z"]].values
-
-    if not (l2_position[0] <= bbox[1, 0] and l2_position[0] >= bbox[0, 0]):
-        print("out of x range")
-    if not (l2_position[1] <= bbox[1, 1] and l2_position[1] >= bbox[0, 1]):
-        print("out of y range")
-    if not (l2_position[2] <= bbox[1, 2] and l2_position[2] >= bbox[0, 2]):
-        print("out of z range")
-
-    return bbox
-
-
-# %%
-cv.get_chunk_layer(160032475051983415)
-# %%
-
-node_dfs = []
-edge_dfs = []
-for l2_id in l2_node_data.index[:]:
-    bbox = get_chunk_bbox(l2_id, cv, viewer_resolution)
-    node_df, edge_df = make_bbox_nodes_edges(bbox)
-
-    line_sb, lines_df = spatial_graph_mapper(
-        node_df,
-        edge_df,
-        point_columns=["x", "y", "z"],
-        resolution=viewer_resolution,
-        layer_name=f"bbox-l2-{l2_id}",
-        color="grey",
-    )
-    dfs.append(lines_df)
-    sbs.append(line_sb)
-
-
-from cloudvolume import Bbox
-
-cv_bbox = Bbox(
-    (bbox_ngl[0] / np.array([2, 2, 1])).astype(int),
-    (bbox_ngl[1] / np.array([2, 2, 1])).astype(int),
-)
-files = cv.download_files(cv_bbox)
-
-# %%
-
-
-def decode_bbox_from_filename(filename):
-    res_key = filename.split("/")[0]
-    x_key = filename.split("/")[1].split("_")[0]
-    y_key = filename.split("/")[1].split("_")[1]
-    z_key = filename.split("/")[1].split("_")[2]
-    # cg_res = np.array(res_key.split("_")).astype(int)
-    x_min, x_max = np.array(x_key.split("-")).astype(int)
-    y_min, y_max = np.array(y_key.split("-")).astype(int)
-    z_min, z_max = np.array(z_key.split("-")).astype(int)
-    bounds = np.array([[x_min, x_max], [y_min, y_max], [z_min, z_max]]).T
-    bounds = bounds * np.array([2, 2, 1])
-    return bounds
-
-for l2_node, row in l2_node_data.iterrows():
-    x, y, z = (row[["x", "y", "z"]] / np.array([2, 2, 1])).astype(int)
-    cv_bbox = Bbox(
-        (x - 1, y - 1, z - 1),
-        (x + 1, y + 1, z + 1),
-    )
-    # cv_bbox = Bbox(
-    #     (bbox_ngl[0] / np.array([2, 2, 1])).astype(int),
-    #     (bbox_ngl[1] / np.array([2, 2, 1])).astype(int),
-    # )
-    files = cv.download_files(cv_bbox)
-    for file in files.keys():
-        print(decode_bbox_from_filename(file))
-
-
-# %%
-# n_vertices = 8
-# node_dfs = []
-# edge_dfs = []
-# for i, file_name in enumerate(files.keys()):
-#     res_key = file_name.split("/")[0]
-#     x_key = file_name.split("/")[1].split("_")[0]
-#     y_key = file_name.split("/")[1].split("_")[1]
-#     z_key = file_name.split("/")[1].split("_")[2]
-#     cg_res = np.array(res_key.split("_")).astype(int)
-#     x_min, x_max = np.array(x_key.split("-")).astype(int)
-#     y_min, y_max = np.array(y_key.split("-")).astype(int)
-#     z_min, z_max = np.array(z_key.split("-")).astype(int)
-#     bounds = np.array([[x_min, x_max], [y_min, y_max], [z_min, z_max]]).T
-#     bounds = bounds * np.array([2, 2, 1])
-#     node_df, edge_df = make_bbox_nodes_edges(bounds)
-#     node_df.index = node_df.index + n_vertices * i
-#     edge_df = edge_df + n_vertices * i
-#     node_dfs.append(node_df)
-#     edge_dfs.append(edge_df)
-# all_node_df = pd.concat(node_dfs)
-# all_edge_df = pd.concat(edge_dfs)
-
-line_sb, lines_df = spatial_graph_mapper(
-    all_node_df,
-    all_edge_df,
-    point_columns=["x", "y", "z"],
-    resolution=viewer_resolution,
-    layer_name="bbox-all-l2",
-)
-dfs.append(lines_df)
-sbs.append(line_sb)
-
-return_as = "html"
+return_as = 'html'
 sb = statebuilder.ChainedStateBuilder(sbs)
 statebuilder.helpers.package_state(dfs, sb, client=client, return_as=return_as)
 
-# %%
-l2_id = l2_node_data.index[0]
-chunk_loc = cv.meta.decode_chunk_position(l2_id)
-offset_vox = np.array(cv.meta.voxel_offset(0))
-cv.meta.graph_chunk_size
-cv.meta.chunk_size(0)
-cv.mip_resolution(0)
-
-print("chunk_loc", chunk_loc)
-print("offset_vox", offset_vox)
-print("graph_chunk_size", cv.meta.graph_chunk_size)
-print("chunk_size", cv.meta.chunk_size(0))
-print("mip_resolution", cv.mip_resolution(0))
-print("viewer_resolution", viewer_resolution)
-
-# %%
-cv.get_chunk_mappings(l2_id)
-# %%
-cv.get_chunk_layer(l2_id)
-# %%
-
-# %%
-type(files)
-
-# %%
-files.keys()
 # %%
