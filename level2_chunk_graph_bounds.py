@@ -89,7 +89,63 @@ true_edges = pd.MultiIndex.from_arrays(np.unique(np.sort(true_edges, axis=1), ax
 # %%
 my_edges.difference(true_edges)
 
+
 # %%
+def spatial_graph_mapper(
+    nodes_df: pd.DataFrame, edges_df: pd.DataFrame, point_column: str
+):
+    edges_df = edges_df.copy()
+    if "pre" in edges_df.columns and "post" in edges_df.columns:
+        edges_df = edges_df.rename(columns={"pre": "source", "post": "target"})
+    if 0 in edges_df.columns and 1 in edges_df.columns:
+        edges_df = edges_df.rename(columns={0: "source", 1: "target"})
+
+    line_rows = []
+    for edge in edges_df.iterrows():
+        source = edge[1]["source"]
+        target = edge[1]["target"]
+        source_point = nodes_df.loc[source][point_column]
+        target_point = nodes_df.loc[target][point_column]
+        if isinstance(source_point, pd.Series):
+            # preprend "source" to everything index element for this series
+            source_point.index = "source_" + source_point.index
+            # preprend "target" to everything index element for this series
+            target_point.index = "target_" + target_point.index
+            source_point = source_point.to_dict()
+            target_point = target_point.to_dict()
+            line_rows.append(
+                {
+                    **source_point,
+                    **target_point,
+                }
+            )
+        else:
+            line_rows.append(
+                {
+                    "start": source_point,
+                    "end": target_point,
+                }
+            )
+
+    line_df = pd.DataFrame(line_rows)
+
+    line_mapper = statebuilder.LineMapper(
+        point_column_a="source",
+        point_column_b="target",
+        set_position=False,
+        split_positions=True,
+    )
+    line_layer = statebuilder.AnnotationLayerConfig(
+        mapping_rules=line_mapper,
+        name="bbox_edges",
+        color="white",
+    )
+    line_sb = statebuilder.StateBuilder(
+        [line_layer], client=client, resolution=viewer_resolution
+    )
+
+    return line_sb, line_df
+
 
 from nglui import statebuilder
 
@@ -128,19 +184,8 @@ vertices = [
     [bbox_ngl[0, 0], bbox_ngl[1, 1], bbox_ngl[1, 2]],
     [bbox_ngl[1, 0], bbox_ngl[1, 1], bbox_ngl[1, 2]],
 ]
-point_df = pd.DataFrame(vertices, columns=["point_x", "point_y", "point_z"])
-point_df["point"] = list(
-    zip(point_df["point_x"], point_df["point_y"], point_df["point_z"])
-)
-point_mapper = statebuilder.PointMapper(point_column="point", split_positions=True)
-point_layer = statebuilder.AnnotationLayerConfig(
-    mapping_rules=point_mapper, color="blue", name="bbox_corners"
-)
-point_sb = statebuilder.StateBuilder(
-    [point_layer], client=client, resolution=viewer_resolution
-)
-dfs.append(point_df)
-sbs.append(point_sb)
+
+node_df = pd.DataFrame(vertices, columns=["x", "y", "z"], index=range(len(vertices)))
 
 box_edges = [
     [0, 1],
@@ -156,31 +201,46 @@ box_edges = [
     [2, 6],
     [3, 7],
 ]
-lines = []
-for edge in box_edges:
-    lines.append(
-        {
-            "start": vertices[edge[0]],
-            "end": vertices[edge[1]],
-        }
-    )
+edge_df = pd.DataFrame(box_edges, columns=["source", "target"])
 
 
-# make a dataframe of the lines
-lines_df = pd.DataFrame(lines)
+line_sb, lines_df = spatial_graph_mapper(node_df, edge_df, point_column=["x", "y", "z"])
+
+# lines = []
+# for edge in box_edges:
+#     lines.append(
+#         {
+#             "start": vertices[edge[0]],
+#             "end": vertices[edge[1]],
+#         }
+#     )
+
+# # make a dataframe of the lines
+# lines_df = pd.DataFrame(lines)
 
 # make a statebuilder object for the lines
-line_mapper = statebuilder.LineMapper(point_column_a="start", point_column_b="end")
-line_layer = statebuilder.AnnotationLayerConfig(
-    mapping_rules=line_mapper,
-    name="bbox_edges",
-    color="red",
-)
-line_sb = statebuilder.StateBuilder(
-    [line_layer], client=client, resolution=viewer_resolution
-)
+# line_mapper = statebuilder.LineMapper(
+#     point_column_a="start", point_column_b="end", set_position=False
+# )
+# line_layer = statebuilder.AnnotationLayerConfig(
+#     mapping_rules=line_mapper,
+#     name="bbox_edges",
+#     color="white",
+# )
+# line_sb = statebuilder.StateBuilder(
+#     [line_layer], client=client, resolution=viewer_resolution
+# )
 dfs.append(lines_df)
 sbs.append(line_sb)
+
+
+
+
+l2_ids
+
+l2_data = pd.DataFrame(client.l2cache.get_l2data(l2_ids)).T
+l2_data.index = l2_data.index.astype(int)
+
 
 
 return_as = "html"
