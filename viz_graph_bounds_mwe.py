@@ -244,19 +244,28 @@ sbs.append(l2_line_sb)
 
 
 def get_chunk_bbox(l2_id, cv, viewer_resolution):
-    chunk_loc = cv.meta.decode_chunk_position(l2_id)
-    offset_vox = np.array(cv.meta.voxel_offset(0))
-    # chunk_loc -= np.array([0, 0, 1])
+    # chunk_loc = cv.meta.decode_chunk_position(l2_id)
+    # offset_vox = np.array(cv.meta.voxel_offset(0))
+    # # chunk_loc -= np.array([0, 0, 1])
+
+    # lb = (
+    #     offset_vox
+    #     + np.array(np.atleast_2d(chunk_loc) * cv.meta.graph_chunk_size).squeeze()
+    # )
+    # ub = np.array((lb + cv.meta.chunk_size(0)).squeeze())
+
+    # scaling = np.array(cv.mip_resolution(0) / viewer_resolution)
+    # lb = lb * scaling
+    # ub = ub * scaling
+    chunk_loc = cv.mesh.meta.meta.decode_chunk_position(l2_id)
+    offset_vox = np.array(cv.mesh.meta.meta.voxel_offset(0))
+    scaling = np.array(cv.mip_resolution(0) / viewer_resolution)
 
     lb = (
         offset_vox
-        + np.array(np.atleast_2d(chunk_loc) * cv.meta.graph_chunk_size).squeeze()
-    )
-    ub = np.array((lb + cv.meta.chunk_size(0)).squeeze())
-
-    scaling = np.array(cv.mip_resolution(0) / viewer_resolution)
-    lb = lb * scaling
-    ub = ub * scaling
+        + np.array(np.atleast_2d(chunk_loc) * cv.mesh.meta.chunk_size).squeeze()
+    ) * scaling
+    ub = lb + cv.mesh.meta.chunk_size * scaling
 
     bbox = np.array([lb, ub], dtype=int)
 
@@ -271,6 +280,10 @@ def get_chunk_bbox(l2_id, cv, viewer_resolution):
 
     return bbox
 
+
+# %%
+cv.get_chunk_layer(160032475051983415)
+# %%
 
 node_dfs = []
 edge_dfs = []
@@ -298,27 +311,59 @@ cv_bbox = Bbox(
 )
 files = cv.download_files(cv_bbox)
 
-n_vertices = 8
-node_dfs = []
-edge_dfs = []
-for i, file_name in enumerate(files.keys()):
-    res_key = file_name.split("/")[0]
-    x_key = file_name.split("/")[1].split("_")[0]
-    y_key = file_name.split("/")[1].split("_")[1]
-    z_key = file_name.split("/")[1].split("_")[2]
-    cg_res = np.array(res_key.split("_")).astype(int)
+# %%
+
+
+def decode_bbox_from_filename(filename):
+    res_key = filename.split("/")[0]
+    x_key = filename.split("/")[1].split("_")[0]
+    y_key = filename.split("/")[1].split("_")[1]
+    z_key = filename.split("/")[1].split("_")[2]
+    # cg_res = np.array(res_key.split("_")).astype(int)
     x_min, x_max = np.array(x_key.split("-")).astype(int)
     y_min, y_max = np.array(y_key.split("-")).astype(int)
     z_min, z_max = np.array(z_key.split("-")).astype(int)
     bounds = np.array([[x_min, x_max], [y_min, y_max], [z_min, z_max]]).T
     bounds = bounds * np.array([2, 2, 1])
-    node_df, edge_df = make_bbox_nodes_edges(bounds)
-    node_df.index = node_df.index + n_vertices * i
-    edge_df = edge_df + n_vertices * i
-    node_dfs.append(node_df)
-    edge_dfs.append(edge_df)
-all_node_df = pd.concat(node_dfs)
-all_edge_df = pd.concat(edge_dfs)
+    return bounds
+
+for l2_node, row in l2_node_data.iterrows():
+    x, y, z = (row[["x", "y", "z"]] / np.array([2, 2, 1])).astype(int)
+    cv_bbox = Bbox(
+        (x - 1, y - 1, z - 1),
+        (x + 1, y + 1, z + 1),
+    )
+    # cv_bbox = Bbox(
+    #     (bbox_ngl[0] / np.array([2, 2, 1])).astype(int),
+    #     (bbox_ngl[1] / np.array([2, 2, 1])).astype(int),
+    # )
+    files = cv.download_files(cv_bbox)
+    for file in files.keys():
+        print(decode_bbox_from_filename(file))
+
+
+# %%
+# n_vertices = 8
+# node_dfs = []
+# edge_dfs = []
+# for i, file_name in enumerate(files.keys()):
+#     res_key = file_name.split("/")[0]
+#     x_key = file_name.split("/")[1].split("_")[0]
+#     y_key = file_name.split("/")[1].split("_")[1]
+#     z_key = file_name.split("/")[1].split("_")[2]
+#     cg_res = np.array(res_key.split("_")).astype(int)
+#     x_min, x_max = np.array(x_key.split("-")).astype(int)
+#     y_min, y_max = np.array(y_key.split("-")).astype(int)
+#     z_min, z_max = np.array(z_key.split("-")).astype(int)
+#     bounds = np.array([[x_min, x_max], [y_min, y_max], [z_min, z_max]]).T
+#     bounds = bounds * np.array([2, 2, 1])
+#     node_df, edge_df = make_bbox_nodes_edges(bounds)
+#     node_df.index = node_df.index + n_vertices * i
+#     edge_df = edge_df + n_vertices * i
+#     node_dfs.append(node_df)
+#     edge_dfs.append(edge_df)
+# all_node_df = pd.concat(node_dfs)
+# all_edge_df = pd.concat(edge_dfs)
 
 line_sb, lines_df = spatial_graph_mapper(
     all_node_df,
