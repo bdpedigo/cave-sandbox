@@ -101,3 +101,69 @@ nuc_df = versioned_client.materialize.query_table(
 )
 print(nuc_df["pt_position"].values)
 
+
+# %%
+versioned_client.materialize.get_views()
+
+# %%
+print(
+    unversioned_client.materialize.query_view(
+        "single_neurons", filter_in_dict={"pt_root_id": [root]}
+    )["id"].values
+)
+
+# should not be there
+print(
+    unversioned_client.materialize.query_view(
+        "single_neurons",
+        filter_in_dict={"pt_root_id": [root]},
+        materialization_version=661,
+    )["id"].values
+)
+
+print(
+    unversioned_client.materialize.query_view(
+        "single_neurons",
+        filter_in_dict={"pt_root_id": [old_root]},
+        materialization_version=661,
+    )["id"].values
+)
+
+print(
+    versioned_client.materialize.query_view(
+        "single_neurons", filter_in_dict={"pt_root_id": [old_root]}
+    )["id"].values
+)
+
+# %%
+now = datetime.datetime(2024, 7, 18, 10, 17, 49, 822856)
+unversioned_client.materialize.live_live_query(
+    "nucleus_detection_v0",
+    timestamp=now,
+    filter_equal_dict={"nucleus_detection_v0": {"pt_root_id": root}},
+)
+
+# %%
+# should be `root`
+unversioned_client.chunkedgraph.suggest_latest_roots(old_root)
+
+# %%
+# should be `old_root`
+versioned_client.chunkedgraph.suggest_latest_roots(old_root)
+
+# %%
+
+# this is right before ID was created
+versioned_client.version = 900
+
+print(versioned_client.timestamp)
+
+print(unversioned_client.chunkedgraph.get_root_timestamps(root))
+
+# suggest latest should give something else
+# looked at this object in NGL and it looks right
+print(versioned_client.chunkedgraph.suggest_latest_roots(root))
+
+# after this time, suggest latest should give root
+versioned_client.version = 910
+print(versioned_client.chunkedgraph.suggest_latest_roots(root))
