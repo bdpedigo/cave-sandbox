@@ -1,8 +1,23 @@
 # %%
 
 import datetime
+import logging
+from http.client import HTTPConnection
 
 from caveclient import CAVEclient
+
+
+def debug_requests_on():
+    """Switches on logging of the requests module."""
+    HTTPConnection.debuglevel = 1
+
+    logging.basicConfig()
+    logging.getLogger().setLevel(logging.DEBUG)
+    requests_log = logging.getLogger("requests.packages.urllib3")
+    requests_log.setLevel(logging.DEBUG)
+    requests_log.propagate = True
+
+debug_requests_on()
 
 versioned_client = CAVEclient("minnie65_phase3_v1", version=1078)
 print(versioned_client.version)
@@ -13,6 +28,8 @@ print(versioned_client.materialize.version)
 
 # %%
 print(versioned_client.chunkedgraph.timestamp)
+
+versioned_client.chunkedgraph.timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f")
 
 # %%
 # should break
