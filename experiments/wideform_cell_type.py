@@ -121,17 +121,6 @@ def filter_map_logic(table: ibis.Table, field_name: str) -> ibis.Table:
 
 import pandas as pd
 
-coarse_type_source_info = [
-    {"aibs_metamodel_celltypes_v661_corrections": "classification_system"},
-    {
-        "bodor_pt_target_proofread": "classification_system"
-    },  # uses nucleus_neuron_svm table so shouldn't use target_id?
-    {"aibs_column_nonneuronal_ref": "classification_system"},
-    {"allen_v1_column_types_slanted_ref": "classification_system"},
-    # the last two are models
-    {"baylor_log_reg_cell_type_coarse_v1": "cell_type"},
-    {"aibs_metamodel_celltypes_v661": "classification_system"},
-]
 coarse_type_source_info = {
     "aibs_metamodel_celltypes_v661_corrections": {"field": "classification_system"},
     "bodor_pt_target_proofread": {"field": "classification_system"},
@@ -277,7 +266,7 @@ cell_table = cell_table.join(
     proofreading_table,
     cell_table[join_field] == proofreading_table[join_field],
     how="left",
-)
+).drop([f"{join_field}_right"])
 
 cell_table = cell_table.rename(
     {
@@ -290,15 +279,20 @@ cell_table = cell_table.rename(
 
 # %%
 
-cell_table.drop_null("coarse_type").sample(0.01).drop(
+cell_table.drop_null("coarse_type").sample(0.001)[
     [
-        "pt_root_id",
-        "pt_supervoxel_id",
-        "pt_position_x",
-        "pt_position_y",
-        "pt_position_z",
+        "target_id",
+        "coarse_type",
+        "coarse_type_source",
+        "cell_type",
+        "cell_type_source",
+        "mtype",
+        "mtype_source",
+        "visual_area",
+        "proofreading_strategy_axon",
     ]
-).to_pandas().head(10)
+].to_pandas().head(10)
+
 
 # %%
 ibis.to_sql(cell_table)
