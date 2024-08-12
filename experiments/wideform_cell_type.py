@@ -50,6 +50,7 @@ def coagulate(
         source_field = source_info["field"]
         df = client.materialize.query_table(source_name, log_warning=False)
         this_table = ibis.memtable(df, name=source_name)[join_field, source_field]
+        this_table = this_table.distinct(on=join_field, keep=None)
         this_field_name = f"{field_name}_{source_name}"
         this_table = this_table.rename({this_field_name: source_field})
 
@@ -74,7 +75,6 @@ def coagulate(
             )
         }
     )
-
     if condense_sources:
         table = table.mutate(
             {
@@ -84,7 +84,6 @@ def coagulate(
             }
         )
         table = table.drop(source_names)
-
     if drop_sources:
         table = table.drop(source_field_names)
 
@@ -216,6 +215,7 @@ cell_table = coagulate(
     drop_sources=drop_sources,
 )
 
+
 # %%
 cell_table[field_name].value_counts().to_pandas()
 
@@ -233,6 +233,7 @@ cell_table = coagulate(
     condense_sources=False,
     drop_sources=True,
 )
+
 
 # %%
 cell_table["visual_area"].value_counts().to_pandas()
@@ -276,6 +277,7 @@ cell_table = cell_table.rename(
         "proofreading_strategy_axon": "strategy_axon",
     }
 )
+
 
 # %%
 
@@ -438,5 +440,5 @@ seg_prop = SegmentProperties.from_dataframe(
 print("M-Type:")
 generate_link_from_segment_properties(seg_prop)
 
-#%%
+# %%
 df.to_csv("joint_cell_table.csv", index=False)
