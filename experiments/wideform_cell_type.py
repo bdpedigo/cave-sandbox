@@ -441,4 +441,4 @@ print("M-Type:")
 generate_link_from_segment_properties(seg_prop)
 
 # %%
-df.to_csv("joint_cell_table.csv", index=False)
+df.to_csv("./cave-sandbox/data/joint_cell_table.csv", index=False)
