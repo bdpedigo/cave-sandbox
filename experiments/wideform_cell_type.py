@@ -428,11 +428,15 @@ field = "mtype"
 tag_value_cols = [f"{field}_{source}" for source in mtype_source_info.index]
 
 seg_prop = SegmentProperties.from_dataframe(
-    prepend_columns(seg_df.reset_index(), tag_value_cols),
+    seg_df.reset_index(),
     id_col="pt_root_id",
     label_col="target_id",
     tag_value_cols=tag_value_cols,
+    prepend_col_name=True,
 )
 
 print("M-Type:")
 generate_link_from_segment_properties(seg_prop)
+
+#%%
+df.to_csv("joint_cell_table.csv", index=False)
