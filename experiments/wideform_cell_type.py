@@ -442,3 +442,18 @@ generate_link_from_segment_properties(seg_prop)
 
 # %%
 df.to_csv("./cave-sandbox/data/joint_cell_table.csv", index=False)
+
+# %%
+client.materialize.get_views()
+
+# %%
+client.materialize.get_view_schemas()
+# %%
+client = CAVEclient("minnie65_phase3_v1", version=1078)
+root_id = 864691135395443445
+client.materialize.query_view(
+    "connections_with_nuclei", filter_equal_dict={"pre_pt_root_id": root_id}
+)
+# %%
+client = CAVEclient("minnie65_phase3_v1", version=1078)
+out = client.materialize.query_view("synapses_pni_2_in_out_degree", random_sample=10)
