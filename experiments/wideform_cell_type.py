@@ -122,7 +122,7 @@ import pandas as pd
 
 coarse_type_source_info = {
     "aibs_metamodel_celltypes_v661_corrections": {"field": "classification_system"},
-    "bodor_pt_target_proofread": {"field": "classification_system"},
+    # "bodor_pt_target_proofread": {"field": "classification_system"},
     "aibs_column_nonneuronal_ref": {"field": "classification_system"},
     "allen_v1_column_types_slanted_ref": {"field": "classification_system"},
     "baylor_log_reg_cell_type_coarse_v1": {"field": "cell_type"},

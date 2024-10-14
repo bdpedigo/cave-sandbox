@@ -8,7 +8,6 @@ from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from skops.io import dump
 
 from caveclient import CAVEclient
 from minniemorpho.segclr import SegCLRQuery
@@ -100,7 +99,7 @@ models = {
     "std_logistic": Pipeline(
         [
             ("scaler", StandardScaler()),
-            ("logistic", LogisticRegression(max_iter=500, n_jobs=-1)),
+            ("logistic", LogisticRegression(max_iter=2000, n_jobs=-1)),
         ]
     ),
     "std_logistic_balanced": Pipeline(
@@ -108,7 +107,7 @@ models = {
             ("scaler", StandardScaler()),
             (
                 "logistic",
-                LogisticRegression(max_iter=500, n_jobs=-1, class_weight="balanced"),
+                LogisticRegression(max_iter=2000, n_jobs=-1, class_weight="balanced"),
             ),
         ]
     ),
@@ -172,7 +171,28 @@ conf_mat.index.name = "True"
 conf_mat.columns.name = "Predicted"
 
 # %%
-sns.heatmap(conf_mat, annot=True, cmap="Reds", fmt=".2f")
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(10, 10))
+sns.set_context("talk")
+sns.heatmap(
+    conf_mat,
+    annot=True,
+    cmap="Reds",
+    fmt=".2f",
+    ax=ax,
+    square=True,
+    cbar_kws=dict(shrink=0.7),
+)
+ax.set_yticklabels(
+    [tick.get_text().capitalize() for tick in ax.get_yticklabels()], rotation=0
+)
+ax.set_xticklabels(
+    [tick.get_text().capitalize() for tick in ax.get_xticklabels()], rotation=45
+)
+
+plt.savefig('segclr_confusion_matrix.png', dpi=300, bbox_inches='tight')
+plt.savefig('segclr_confusion_matrix.svg', dpi=300, bbox_inches='tight')
 
 # %%
 
@@ -193,6 +213,6 @@ final_model.fit(labeled_embedding_df[embedding_cols], labeled_embedding_df["labe
 # %%
 
 
-dump(final_model, "cave-sandbox/models/segclr_logreg_bdp.skops")
+# dump(final_model, "cave-sandbox/models/segclr_logreg_bdp.skops")
 
 # %%
